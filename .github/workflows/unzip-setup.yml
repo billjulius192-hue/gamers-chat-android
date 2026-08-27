@@ -1,0 +1,53 @@
+name: Unzip Uploaded Project
+
+# Triggers automatically the moment you upload a .zip file to the
+# repo root through GitHub's "Upload files" button. Extracts it,
+# places the files at the correct paths, deletes the zip, and commits
+# the result -- so you never have to upload individual nested files
+# or folders from your phone.
+on:
+  push:
+    paths:
+      - '*.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract the uploaded zip
+        run: |
+          # Find whichever .zip file was uploaded to the root.
+          ZIPFILE=$(ls *.zip | head -n 1)
+          echo "Found: $ZIPFILE"
+
+          # Extract it into a temporary folder.
+          mkdir -p _extracted
+          unzip -q "$ZIPFILE" -d _extracted
+
+          # The zip contains one top-level folder (e.g.
+          # gamers-chat-android/) -- move its CONTENTS to the repo
+          # root, not the folder itself, so paths like app/build.gradle
+          # land correctly instead of gamers-chat-android/app/build.gradle.
+          INNER_FOLDER=$(ls _extracted)
+          echo "Inner folder: $INNER_FOLDER"
+          shopt -s dotglob
+          mv "_extracted/$INNER_FOLDER"/* .
+
+          # Clean up.
+          rm -rf _extracted
+          rm -f "$ZIPFILE"
+
+      - name: Commit the extracted project
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A
+          git commit -m "Extract uploaded Android project" || echo "Nothing to commit"
+          git push
