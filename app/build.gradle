@@ -33,3 +33,17 @@ dependencies {
     // installed app rather than a browser tab.
     implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.1'
 }
+
+// WORKAROUND for a confirmed bug in androidbrowserhelper 2.6.1: it
+// unintentionally pulls in androidx.browser:browser:1.9.0-alpha04,
+// an alpha dependency that requires compileSdk 36 and a newer AGP
+// than this project uses. We don't need anything from that alpha
+// version -- forcing the last stable release (1.8.0) here fixes the
+// build without needing to upgrade the whole toolchain to chase an
+// unstable dependency. See:
+// https://github.com/GoogleChrome/android-browser-helper/issues/538
+configurations.all {
+    resolutionStrategy {
+        force 'androidx.browser:browser:1.8.0'
+    }
+}
