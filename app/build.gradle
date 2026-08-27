@@ -1,0 +1,35 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.gamerschat.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.gamerschat.app"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // Trusted Web Activity support library -- this is what lets a
+    // native Android app host and control our existing PWA inside a
+    // full-screen, chrome-less browser view that looks like a real
+    // installed app rather than a browser tab.
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.1'
+}

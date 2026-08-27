@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the app's near-black theme from index.html -->
+    <color name="statusBarColor">#0a0a0a</color>
+    <color name="navigationBarColor">#0a0a0a</color>
+</resources>
