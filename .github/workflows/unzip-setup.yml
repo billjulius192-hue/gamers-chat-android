@@ -35,10 +35,19 @@ jobs:
           # gamers-chat-android/) -- move its CONTENTS to the repo
           # root, not the folder itself, so paths like app/build.gradle
           # land correctly instead of gamers-chat-android/app/build.gradle.
+          #
+          # Using cp -r (not mv) here deliberately: the zip includes
+          # its own .github/workflows/build.yml, which collides with
+          # this very unzip-setup.yml already sitting in the repo's
+          # .github/workflows/ folder. Plain `mv` refuses to merge a
+          # non-empty destination folder and fails outright -- cp -r
+          # merges folder contents instead of blocking on collision,
+          # then we remove the now-empty source folder ourselves.
           INNER_FOLDER=$(ls _extracted)
           echo "Inner folder: $INNER_FOLDER"
           shopt -s dotglob
-          mv "_extracted/$INNER_FOLDER"/* .
+          cp -r "_extracted/$INNER_FOLDER"/* .
+          rm -rf "_extracted/$INNER_FOLDER"
 
           # Clean up.
           rm -rf _extracted
