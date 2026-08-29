@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace 'com.gamerschat.app'
-    compileSdk 34
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.gamerschat.app"
         minSdk 24
-        targetSdk 34
+        targetSdk 36
         versionCode 1
         versionName "1.0"
     }
@@ -52,20 +52,28 @@ dependencies {
     // full-screen, chrome-less browser view that looks like a real
     // installed app rather than a browser tab.
     //
-    // Pinned to 2.2.0 deliberately: versions 2.6.x+ pull in an alpha
-    // androidx.browser dependency that requires compileSdk 36. We
-    // previously tried to work around that by FORCING androidx.browser
-    // down to 1.8.0 while keeping androidbrowserhelper 2.6.1 -- but
-    // 2.6.1's internal code was written against the newer alpha APIs,
-    // so forcing an older androidx.browser likely caused a runtime
-    // failure (NoSuchMethodError or similar) the moment LauncherActivity
-    // tried to actually launch the TWA. That would explain a build
-    // that compiles fine but silently does nothing when the icon is
-    // tapped -- no crash shown, no log entry, because the mismatch
-    // happens deep inside a translucent, invisible launch step.
+    // ROOT CAUSE FOUND (confirmed via a real on-device crash log):
+    // NoSuchMethodError on setLaunchHandlerClientMode -- this method
+    // was added to androidx.browser specifically in version 1.9.0 as
+    // part of the Launch Handler API. androidbrowserhelper's
+    // LauncherActivity calls this method unconditionally, so ANY
+    // version of androidx.browser below 1.9.0 will always crash here,
+    // no matter which androidbrowserhelper version is used. Our
+    // earlier attempts (forcing 1.8.0, then downgrading to 2.2.0)
+    // were both doomed for the same underlying reason.
     //
-    // 2.2.0 is a well-established, stable release from before this
-    // alpha-dependency issue existed at all, so its whole dependency
-    // tree is internally consistent -- no forcing required.
-    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.2.0'
+    // The actual fix: androidx.browser 1.9.0 requires compileSdk 36,
+    // which requires AGP 9.1.0+ (confirmed via Google's own AGP 8.9
+    // release notes: max API 35; AGP 9.1.0 release notes: max API 36).
+    // Both build.gradle (root) and gradle-wrapper.properties have been
+    // updated to match. With that in place, we can use a recent,
+    // properly-supported androidbrowserhelper version instead of an
+    // old workaround release.
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.1'
+
+    // Explicitly pinning to the STABLE 1.9.0 release (not the alpha
+    // 1.9.0-alpha04 that 2.6.1 pulls in by default) -- we need 1.9.0+
+    // for setLaunchHandlerClientMode to exist at all, but there's no
+    // reason to use an alpha build when a stable one is available.
+    implementation 'androidx.browser:browser:1.9.0'
 }
