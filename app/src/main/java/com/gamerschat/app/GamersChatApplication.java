@@ -7,7 +7,7 @@ import java.io.StringWriter;
 
 // This replaces Android's default "app just disappears" behavior with
 // something we can actually see: any uncaught crash, anywhere in the
-// app, gets captured here and handed to CrashDisplayActivity, which
+// app, gets captured here and handed to MinimalTestActivity, which
 // shows the full error text directly on screen. This is a temporary
 // diagnostic tool -- once we know the real cause, this can be removed.
 public class GamersChatApplication extends Application {
@@ -25,7 +25,7 @@ public class GamersChatApplication extends Application {
                 throwable.printStackTrace(new PrintWriter(sw));
                 String fullError = sw.toString();
 
-                Intent intent = new Intent(getApplicationContext(), CrashDisplayActivity.class);
+                Intent intent = new Intent(getApplicationContext(), MinimalTestActivity.class);
                 intent.putExtra("crash_details", fullError);
                 intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 getApplicationContext().startActivity(intent);

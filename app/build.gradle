@@ -51,19 +51,21 @@ dependencies {
     // native Android app host and control our existing PWA inside a
     // full-screen, chrome-less browser view that looks like a real
     // installed app rather than a browser tab.
-    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.1'
-}
-
-// WORKAROUND for a confirmed bug in androidbrowserhelper 2.6.1: it
-// unintentionally pulls in androidx.browser:browser:1.9.0-alpha04,
-// an alpha dependency that requires compileSdk 36 and a newer AGP
-// than this project uses. We don't need anything from that alpha
-// version -- forcing the last stable release (1.8.0) here fixes the
-// build without needing to upgrade the whole toolchain to chase an
-// unstable dependency. See:
-// https://github.com/GoogleChrome/android-browser-helper/issues/538
-configurations.all {
-    resolutionStrategy {
-        force 'androidx.browser:browser:1.8.0'
-    }
+    //
+    // Pinned to 2.2.0 deliberately: versions 2.6.x+ pull in an alpha
+    // androidx.browser dependency that requires compileSdk 36. We
+    // previously tried to work around that by FORCING androidx.browser
+    // down to 1.8.0 while keeping androidbrowserhelper 2.6.1 -- but
+    // 2.6.1's internal code was written against the newer alpha APIs,
+    // so forcing an older androidx.browser likely caused a runtime
+    // failure (NoSuchMethodError or similar) the moment LauncherActivity
+    // tried to actually launch the TWA. That would explain a build
+    // that compiles fine but silently does nothing when the icon is
+    // tapped -- no crash shown, no log entry, because the mismatch
+    // happens deep inside a translucent, invisible launch step.
+    //
+    // 2.2.0 is a well-established, stable release from before this
+    // alpha-dependency issue existed at all, so its whole dependency
+    // tree is internally consistent -- no forcing required.
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.2.0'
 }
