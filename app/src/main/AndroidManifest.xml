@@ -30,10 +30,19 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
+        android:name=".GamersChatApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.Transparent">
+
+        <!-- Temporary diagnostic activity: shows the exact text of any
+             crash directly on screen. Safe to remove once we've found
+             and fixed the real underlying issue. -->
+        <activity
+            android:name=".CrashDisplayActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.NoTitleBar" />
 
         <!-- The TWA launcher activity, provided by the androidbrowserhelper
              library. It reads the meta-data below to know which website
