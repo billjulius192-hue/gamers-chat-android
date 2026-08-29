@@ -45,6 +45,23 @@
             android:exported="false"
             android:theme="@android:style/Theme.NoTitleBar" />
 
+        <!-- Step 1 of the floating-bubble feature: a standalone screen
+             to request the "draw over other apps" permission. Given
+             its own LAUNCHER entry for now so it's independently
+             testable without touching the main TWA flow that's
+             already working, once the bubble itself is built, this
+             will instead be reached from inside the main app. -->
+        <activity
+            android:name=".OverlayPermissionActivity"
+            android:exported="true"
+            android:label="Voxx Chat Bubble Setup"
+            android:theme="@android:style/Theme.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <!-- The TWA launcher activity, provided by the androidbrowserhelper
              library. It reads the meta-data below to know which website
              to host and trust. -->
