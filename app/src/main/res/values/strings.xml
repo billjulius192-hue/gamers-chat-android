@@ -1,15 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Gamers Chat</string>
+    <string name="app_name">Voxx Chat</string>
 
-    <!--
-      IMPORTANT: replace this with your actual live site URL once your
-      domain is connected. Right now this points at a placeholder;
-      the app will build and install fine, but should be updated to
-      your real gamerschat.app (or netlify.app) URL before real testing.
-    -->
-    <string name="twa_launch_url">https://your-site-name.netlify.app</string>
+    <string name="twa_launch_url">https://tourmaline-starburst-b9d300.netlify.app/</string>
 
     <!-- Must match the host in twa_launch_url above, WITHOUT https:// -->
-    <string name="twa_host">your-site-name.netlify.app</string>
+    <string name="twa_host">tourmaline-starburst-b9d300.netlify.app</string>
 </resources>
+
