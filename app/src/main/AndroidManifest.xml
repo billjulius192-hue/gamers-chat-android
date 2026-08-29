@@ -1,6 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- REQUIRED on Android 11+ (API 30+): without this, the app
+         cannot "see" that Chrome (or any browser) is installed, even
+         if it genuinely is. This causes the TWA launch call to throw
+         ActivityNotFoundException immediately on startup, which is
+         exactly the "in-app error" crash we were seeing. This is a
+         well-documented, common gotcha for TWA apps specifically. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <!-- Needed for the app to reach your Netlify-hosted site at all. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
