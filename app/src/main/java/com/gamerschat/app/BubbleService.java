@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.IBinder;
 import android.provider.Settings;
@@ -88,22 +89,33 @@ public class BubbleService extends Service {
 
         windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
 
-        // Simple placeholder bubble for now: a colored circle with
-        // text. This gets replaced with a proper icon/mic-state
-        // indicator once this basic version is confirmed working.
+        // A real circle (not a square with a background color) using
+        // a GradientDrawable shaped as an oval -- with equal width
+        // and height, an oval renders as a perfect circle.
+        GradientDrawable circleShape = new GradientDrawable();
+        circleShape.setShape(GradientDrawable.OVAL);
+        circleShape.setColor(Color.parseColor("#3ddc97"));
+
         TextView bubble = new TextView(this);
         bubble.setText("🎙️");
-        bubble.setTextSize(28);
+        bubble.setTextSize(18); // was 28 -- too large for a small bubble
         bubble.setGravity(Gravity.CENTER);
-        bubble.setBackgroundColor(Color.parseColor("#3ddc97"));
+        bubble.setBackground(circleShape);
         bubbleView = bubble;
+
+        // Size based on actual screen density (dp -> px) instead of a
+        // raw pixel number, so it's a consistent, genuinely small
+        // size across different phones rather than looking huge on
+        // higher-density screens. 48dp is a standard, comfortable
+        // touch-target size, not an oversized block.
+        int bubbleSizePx = (int) (48 * getResources().getDisplayMetrics().density);
 
         int overlayType = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 : WindowManager.LayoutParams.TYPE_PHONE;
 
         bubbleParams = new WindowManager.LayoutParams(
-                160, 160, // size in pixels -- roughly a fingertip-sized circle
+                bubbleSizePx, bubbleSizePx, // 48dp, converted to real pixels for this screen
                 overlayType,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT
