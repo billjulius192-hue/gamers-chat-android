@@ -1,5 +1,6 @@
 package com.gamerschat.app;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -11,12 +12,18 @@ import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.TextView;
 
 // Step 2 of the floating-bubble feature: a Foreground Service that
@@ -38,6 +45,19 @@ public class BubbleService extends Service {
     private WindowManager windowManager;
     private View bubbleView;
     private WindowManager.LayoutParams bubbleParams;
+
+    // The hidden WebView that actually runs your real, already-working
+    // PWA in the background -- this is what makes the bubble able to
+    // reflect and control REAL call state instead of being a
+    // disconnected native mockup. It's added to the window manager
+    // with zero size (invisible) rather than not attached at all,
+    // because an unattached WebView on some Android versions gets
+    // throttled/suspended much more aggressively.
+    private WebView hiddenWebView;
+
+    // Tracks what the bubble should currently show. Updated by
+    // JS calling back into bridgeToAndroid.updateBubbleState(...).
+    private volatile String currentCallState = "idle"; // idle | ringing | in_call
 
     @Override
     public void onCreate() {
@@ -70,6 +90,10 @@ public class BubbleService extends Service {
 
         if (bubbleView == null) {
             showBubble();
+        }
+
+        if (hiddenWebView == null) {
+            setupHiddenWebView();
         }
 
         // If Android kills this service to free memory, restart it
@@ -167,6 +191,113 @@ public class BubbleService extends Service {
         windowManager.addView(bubbleView, bubbleParams);
     }
 
+    // Loads your real, existing PWA into an invisible WebView running
+    // in the background. This is the actual bridge: the web app's
+    // JavaScript (already built, already working) can call into
+    // Android via bridgeToAndroid.*, and Android can call back into
+    // the page's JS via evaluateJavascript(...) below.
+    @SuppressLint("SetJavaScriptEnabled")
+    private void setupHiddenWebView() {
+        hiddenWebView = new WebView(this);
+
+        WebSettings settings = hiddenWebView.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true); // needed for localStorage (deviceId, session data)
+        settings.setMediaPlaybackRequiresUserGesture(false); // needed for the ringtone / call audio to play without a tap
+
+        hiddenWebView.addJavascriptInterface(new AndroidBridge(), "bridgeToAndroid");
+
+        hiddenWebView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                // Confirms to us (via logcat/Crashlytics-style logging
+                // later) that the page actually loaded successfully.
+                injectBridgeReadyFlag();
+            }
+        });
+
+        hiddenWebView.loadUrl(getString(R.string.twa_launch_url));
+
+        // Attach it to the window manager with zero visible size --
+        // present in the view hierarchy (so it isn't paused as
+        // aggressively as a fully detached WebView) but genuinely
+        // invisible to the user.
+        WindowManager.LayoutParams hiddenParams = new WindowManager.LayoutParams(
+                1, 1,
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        : WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                PixelFormat.TRANSLUCENT
+        );
+        hiddenParams.gravity = Gravity.TOP | Gravity.START;
+        windowManager.addView(hiddenWebView, hiddenParams);
+    }
+
+    // A small, deliberately simple marker so the web page's own JS
+    // can detect "I'm running inside the native bubble service" and
+    // adjust behavior if useful later (e.g. skip showing its own
+    // install banner).
+    private void injectBridgeReadyFlag() {
+        runOnWebView("window.__voxxBubbleBridgeReady = true;");
+    }
+
+    private void runOnWebView(String js) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            if (hiddenWebView != null) {
+                hiddenWebView.evaluateJavascript(js, null);
+            }
+        });
+    }
+
+    // The actual bridge object exposed to the page's JavaScript as
+    // `window.bridgeToAndroid`. Methods here are deliberately small
+    // and specific -- each one is a single fact the web app already
+    // knows and needs to hand to native code, not a general-purpose
+    // remote-control surface.
+    private class AndroidBridge {
+
+        // Called by the PWA's JS whenever call state changes (idle,
+        // an incoming request is ringing, or a call is actively
+        // connected). Runs on a background JS thread, so we hop back
+        // to the main thread before touching any UI.
+        @JavascriptInterface
+        public void updateBubbleState(String state) {
+            currentCallState = state;
+            new Handler(Looper.getMainLooper()).post(() -> updateBubbleAppearance(state));
+        }
+    }
+
+    // Changes the bubble's color/icon to reflect real call state,
+    // called from the JS bridge above. Kept separate from
+    // showBubble()'s initial creation so it can be called repeatedly
+    // without recreating the whole view.
+    private void updateBubbleAppearance(String state) {
+        if (!(bubbleView instanceof TextView)) return;
+        TextView bubble = (TextView) bubbleView;
+
+        GradientDrawable shape = new GradientDrawable();
+        shape.setShape(GradientDrawable.OVAL);
+
+        switch (state) {
+            case "ringing":
+                shape.setColor(Color.parseColor("#ff8c42")); // orange -- matches incoming-request color elsewhere in the app
+                bubble.setText("📞");
+                break;
+            case "in_call":
+                shape.setColor(Color.parseColor("#3ddc97")); // mint -- active call
+                bubble.setText("🎙️");
+                break;
+            default: // idle
+                shape.setColor(Color.parseColor("#444444")); // dim gray -- nothing happening
+                bubble.setText("🎙️");
+                break;
+        }
+        bubble.setBackground(shape);
+    }
+
     private Notification buildForegroundNotification() {
         Intent notificationIntent = new Intent(this, OverlayPermissionActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(
@@ -200,6 +331,11 @@ public class BubbleService extends Service {
         if (bubbleView != null && windowManager != null) {
             windowManager.removeView(bubbleView);
             bubbleView = null;
+        }
+        if (hiddenWebView != null && windowManager != null) {
+            windowManager.removeView(hiddenWebView);
+            hiddenWebView.destroy();
+            hiddenWebView = null;
         }
     }
 
