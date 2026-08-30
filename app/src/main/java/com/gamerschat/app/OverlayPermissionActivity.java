@@ -89,14 +89,50 @@ public class OverlayPermissionActivity extends Activity {
         hideBubbleButton.setText("Hide Floating Bubble");
         hideBubbleButton.setOnClickListener(v -> stopService(new Intent(this, BubbleService.class)));
 
+        // TEMPORARY: lets us test the bubble's appearance changing
+        // WITHOUT needing a second device to send a real request.
+        // This calls the exact same appearance-update path the real
+        // bridge uses (via a broadcast BubbleService listens for),
+        // so a successful color change here proves that half of the
+        // pipeline works, isolating whether any remaining issue is in
+        // the WebView/JS bridge side specifically.
+        TextView testLabel = new TextView(this);
+        testLabel.setText("Test bubble appearance (no 2nd device needed):");
+        testLabel.setTextColor(Color.parseColor("#888888"));
+        testLabel.setTextSize(12);
+        testLabel.setPadding(0, 48, 0, 8);
+
+        Button testRingingButton = new Button(this);
+        testRingingButton.setText("Test: Show Ringing State");
+        testRingingButton.setOnClickListener(v -> sendTestState("ringing"));
+
+        Button testInCallButton = new Button(this);
+        testInCallButton.setText("Test: Show In-Call State");
+        testInCallButton.setOnClickListener(v -> sendTestState("in_call"));
+
+        Button testIdleButton = new Button(this);
+        testIdleButton.setText("Test: Show Idle State");
+        testIdleButton.setOnClickListener(v -> sendTestState("idle"));
+
         layout.addView(title);
         layout.addView(explanation);
         layout.addView(grantButton);
         layout.addView(statusText);
         layout.addView(showBubbleButton);
         layout.addView(hideBubbleButton);
+        layout.addView(testLabel);
+        layout.addView(testRingingButton);
+        layout.addView(testInCallButton);
+        layout.addView(testIdleButton);
 
         setContentView(layout);
+    }
+
+    private void sendTestState(String state) {
+        Intent intent = new Intent(this, BubbleService.class);
+        intent.setAction("TEST_STATE_UPDATE");
+        intent.putExtra("state", state);
+        startService(intent);
     }
 
     @Override

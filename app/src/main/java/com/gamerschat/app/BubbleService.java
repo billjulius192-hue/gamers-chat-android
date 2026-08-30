@@ -96,6 +96,19 @@ public class BubbleService extends Service {
             setupHiddenWebView();
         }
 
+        // TEMPORARY: handles the test buttons on OverlayPermissionActivity,
+        // letting us verify the bubble's appearance-changing logic
+        // works correctly without needing a second device or relying
+        // on the invisible WebView's JS to fire. This bypasses the
+        // WebView/JS bridge entirely -- it's a direct test of the
+        // native side only.
+        if (intent != null && "TEST_STATE_UPDATE".equals(intent.getAction())) {
+            String testState = intent.getStringExtra("state");
+            if (testState != null) {
+                updateBubbleAppearance(testState);
+            }
+        }
+
         // If Android kills this service to free memory, restart it
         // with the same intent rather than leaving the bubble gone
         // silently.
