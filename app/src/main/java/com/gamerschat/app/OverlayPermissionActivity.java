@@ -1,7 +1,9 @@
 package com.gamerschat.app;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -22,12 +24,21 @@ import android.widget.TextView;
 public class OverlayPermissionActivity extends Activity {
 
     private static final int REQUEST_CODE_OVERLAY_PERMISSION = 1001;
+    private static final int REQUEST_CODE_NOTIFICATION_PERMISSION = 1002;
 
     private TextView statusText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Android 13+ (API 33+) requires this runtime permission for
+        // ANY notification to show, including Toast messages fired
+        // from a background Service -- without it, toasts and
+        // notifications are silently swallowed with no error at all.
+        // This is what was making our earlier diagnostic Toasts
+        // invisible even though the underlying code was running fine.
+        requestNotificationPermissionIfNeeded();
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -105,6 +116,20 @@ public class OverlayPermissionActivity extends Activity {
             );
             startActivityForResult(intent, REQUEST_CODE_OVERLAY_PERMISSION);
         }
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33) { // Build.VERSION_CODES.TIRAMISU
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                        new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                        REQUEST_CODE_NOTIFICATION_PERMISSION
+                );
+            }
+        }
+        // Below Android 13, this permission doesn't exist as a
+        // runtime permission -- notifications/toasts work without it.
     }
 
     private boolean hasOverlayPermission() {
