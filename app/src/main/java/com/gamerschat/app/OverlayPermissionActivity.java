@@ -61,13 +61,29 @@ public class OverlayPermissionActivity extends Activity {
         statusText = new TextView(this);
         statusText.setTextColor(Color.parseColor("#3ddc97"));
         statusText.setTextSize(14);
-        statusText.setPadding(0, 32, 0, 0);
+        statusText.setPadding(0, 32, 0, 32);
         updateStatusText();
+
+        Button showBubbleButton = new Button(this);
+        showBubbleButton.setText("Show Floating Bubble (Test)");
+        showBubbleButton.setOnClickListener(v -> {
+            if (hasOverlayPermission()) {
+                startService(new Intent(this, BubbleService.class));
+            } else {
+                statusText.setText("⚠️ Grant the permission first, then try again.");
+            }
+        });
+
+        Button hideBubbleButton = new Button(this);
+        hideBubbleButton.setText("Hide Floating Bubble");
+        hideBubbleButton.setOnClickListener(v -> stopService(new Intent(this, BubbleService.class)));
 
         layout.addView(title);
         layout.addView(explanation);
         layout.addView(grantButton);
         layout.addView(statusText);
+        layout.addView(showBubbleButton);
+        layout.addView(hideBubbleButton);
 
         setContentView(layout);
     }

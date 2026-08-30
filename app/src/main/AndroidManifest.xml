@@ -29,6 +29,16 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- REQUIRED on Android 14+ (API 34+): every foreground service
+         must declare its type, or Android throws
+         MissingForegroundServiceTypeException the moment
+         startForeground() is called. The floating bubble doesn't fit
+         any of Android's specific predefined types (mediaPlayback,
+         location, camera, etc.), so it uses "specialUse", which
+         itself requires this specific permission plus a written
+         explanation attached to the service declaration below. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
     <application
         android:name=".GamersChatApplication"
         android:allowBackup="true"
@@ -99,6 +109,20 @@
                     android:host="@string/twa_host" />
             </intent-filter>
         </activity>
+
+        <!-- Step 2 of the floating-bubble feature: the actual
+             Foreground Service that draws the bubble on screen. Uses
+             "specialUse" since a floating overlay bubble doesn't fit
+             any of Android's specific predefined service types. -->
+        <service
+            android:name=".BubbleService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Displays a floating bubble showing voice call status and controls over other apps, including games, so the user does not have to leave what they are doing to manage a call." />
+        </service>
 
         <!-- Required by the TWA library so notifications shown by the
              web app (via the service worker) are correctly attributed
