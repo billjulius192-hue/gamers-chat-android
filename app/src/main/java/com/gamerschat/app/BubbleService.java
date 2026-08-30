@@ -211,9 +211,29 @@ public class BubbleService extends Service {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                // Confirms to us (via logcat/Crashlytics-style logging
-                // later) that the page actually loaded successfully.
+                // Visible confirmation the page loaded -- temporary
+                // diagnostic, safe to remove once we've confirmed the
+                // bridge is working end to end.
+                android.widget.Toast.makeText(
+                        getApplicationContext(),
+                        "Bubble: site loaded (" + url + ")",
+                        android.widget.Toast.LENGTH_SHORT
+                ).show();
                 injectBridgeReadyFlag();
+            }
+
+            @Override
+            public void onReceivedError(WebView view, android.webkit.WebResourceRequest request,
+                                          android.webkit.WebResourceError error) {
+                super.onReceivedError(view, request, error);
+                // If the site fails to load at all (network issue,
+                // wrong URL, etc.), this makes that failure visible
+                // instead of the bridge just silently never working.
+                android.widget.Toast.makeText(
+                        getApplicationContext(),
+                        "Bubble: site FAILED to load - " + error.getDescription(),
+                        android.widget.Toast.LENGTH_LONG
+                ).show();
             }
         });
 
@@ -266,7 +286,18 @@ public class BubbleService extends Service {
         @JavascriptInterface
         public void updateBubbleState(String state) {
             currentCallState = state;
-            new Handler(Looper.getMainLooper()).post(() -> updateBubbleAppearance(state));
+            new Handler(Looper.getMainLooper()).post(() -> {
+                // Temporary diagnostic: proves the full round trip
+                // (web page JS -> Android bridge -> bubble update)
+                // actually happened, with the real state value. Safe
+                // to remove once confirmed working.
+                android.widget.Toast.makeText(
+                        getApplicationContext(),
+                        "Bubble: state changed to " + state,
+                        android.widget.Toast.LENGTH_SHORT
+                ).show();
+                updateBubbleAppearance(state);
+            });
         }
     }
 
