@@ -115,6 +115,31 @@ public class BubbleService extends Service {
         return START_STICKY;
     }
 
+    private static final String PREFS_NAME = "voxx_chat_shared_prefs";
+    private static final String PREF_DEVICE_ID = "device_id";
+
+    // The real fix for the "bubble never sees real requests" bug:
+    // the main TWA app runs inside actual Chrome (via Custom Tabs),
+    // while this bubble uses a raw android.webkit.WebView -- these
+    // are two completely separate storage engines with no shared
+    // localStorage between them, confirmed via Chrome's own official
+    // documentation on Custom Tabs vs WebView storage isolation.
+    // Neither engine can be silently pointed at the other's storage.
+    //
+    // Instead, native Android's own SharedPreferences becomes the
+    // single source of truth: this bubble generates/reads the
+    // deviceId from there, and injects it into ITS OWN WebView's
+    // localStorage before the page runs (see onPageStarted below).
+    private String getOrCreateSharedDeviceId() {
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String deviceId = prefs.getString(PREF_DEVICE_ID, null);
+        if (deviceId == null) {
+            deviceId = java.util.UUID.randomUUID().toString();
+            prefs.edit().putString(PREF_DEVICE_ID, deviceId).apply();
+        }
+        return deviceId;
+    }
+
     private void showBubble() {
         if (!Settings.canDrawOverlays(this)) {
             // Safety check: if permission was somehow revoked after
@@ -221,6 +246,23 @@ public class BubbleService extends Service {
         hiddenWebView.addJavascriptInterface(new AndroidBridge(), "bridgeToAndroid");
 
         hiddenWebView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                // Inject the shared deviceId BEFORE the page's own
+                // scripts run, so getOrCreateDeviceId() finds this
+                // value already in localStorage instead of generating
+                // its own separate one. This has to happen at
+                // onPageStarted (before load completes), not
+                // onPageFinished, or the page's own init code will
+                // have already run first and created a different ID.
+                String sharedDeviceId = getOrCreateSharedDeviceId();
+                view.evaluateJavascript(
+                        "localStorage.setItem('gamersChatDeviceId', '" + sharedDeviceId + "');",
+                        null
+                );
+            }
+
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);

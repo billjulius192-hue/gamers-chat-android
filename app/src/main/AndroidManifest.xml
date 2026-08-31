@@ -76,7 +76,7 @@
              library. It reads the meta-data below to know which website
              to host and trust. -->
         <activity
-            android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
+            android:name=".VoxxChatLauncherActivity"
             android:exported="true"
             android:label="@string/app_name">
 
