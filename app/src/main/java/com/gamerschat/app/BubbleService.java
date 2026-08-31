@@ -233,6 +233,17 @@ public class BubbleService extends Service {
                         android.widget.Toast.LENGTH_SHORT
                 ).show();
                 injectBridgeReadyFlag();
+
+                // Chromium throttles/suspends a WebView's OWN
+                // setInterval/setTimeout timers once it's treated as
+                // backgrounded -- which our zero-size overlay WebView
+                // always is, since it's genuinely never visible. This
+                // silently broke the page's existing polling loop for
+                // incoming requests. Driving the check from NATIVE
+                // Android's Handler instead sidesteps that entirely,
+                // since Android's own timers aren't subject to
+                // Chromium's background-tab throttling rules.
+                startNativeDrivenPolling();
             }
 
             @Override
@@ -275,6 +286,29 @@ public class BubbleService extends Service {
     // install banner).
     private void injectBridgeReadyFlag() {
         runOnWebView("window.__voxxBubbleBridgeReady = true;");
+    }
+
+    private final Handler nativePollingHandler = new Handler(Looper.getMainLooper());
+    private boolean nativePollingStarted = false;
+
+    // Repeatedly calls the page's own incoming-request check function
+    // every 3 seconds, driven by Android's Handler (not the page's own
+    // setInterval, which gets throttled once the WebView is treated
+    // as backgrounded). Requires the web app to expose a
+    // window.checkIncomingRequestsNow() function -- see the
+    // corresponding index.html change.
+    private void startNativeDrivenPolling() {
+        if (nativePollingStarted) return;
+        nativePollingStarted = true;
+
+        Runnable pollTask = new Runnable() {
+            @Override
+            public void run() {
+                runOnWebView("if (window.checkIncomingRequestsNow) { window.checkIncomingRequestsNow(); }");
+                nativePollingHandler.postDelayed(this, 3000);
+            }
+        };
+        nativePollingHandler.post(pollTask);
     }
 
     private void runOnWebView(String js) {
@@ -372,6 +406,7 @@ public class BubbleService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        nativePollingHandler.removeCallbacksAndMessages(null);
         if (bubbleView != null && windowManager != null) {
             windowManager.removeView(bubbleView);
             bubbleView = null;
