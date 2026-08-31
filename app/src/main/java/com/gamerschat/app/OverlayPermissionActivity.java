@@ -13,6 +13,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 // Step 1 of the floating-bubble feature: explains to the person why
@@ -125,7 +126,15 @@ public class OverlayPermissionActivity extends Activity {
         layout.addView(testInCallButton);
         layout.addView(testIdleButton);
 
-        setContentView(layout);
+        // Wrapped in a ScrollView: a plain LinearLayout does NOT
+        // scroll on its own, so as more buttons were added to this
+        // screen, anything past the bottom of the visible screen
+        // became genuinely unreachable -- not hidden by a bug, just
+        // literally off-screen with no way to scroll to it. This is
+        // very likely why the new test buttons appeared invisible.
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.addView(layout);
+        setContentView(scrollView);
     }
 
     private void sendTestState(String state) {
