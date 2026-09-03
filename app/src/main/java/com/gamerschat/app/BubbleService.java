@@ -20,9 +20,13 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.webkit.WebViewClient;
 import android.widget.TextView;
 
@@ -45,6 +49,16 @@ public class BubbleService extends Service {
     private WindowManager windowManager;
     private View bubbleView;
     private WindowManager.LayoutParams bubbleParams;
+
+    // The small expandable panel shown when the bubble is tapped.
+    // Kept separate from bubbleView since it's shown/hidden
+    // independently and needs to be focusable (to accept keyboard
+    // input), unlike the bubble itself which deliberately isn't.
+    private View panelView;
+    private WindowManager.LayoutParams panelParams;
+    private boolean isPanelShowing = false;
+    private EditText codeInputField;
+    private LinearLayout requestStatusRow;
 
     // The hidden WebView that actually runs your real, already-working
     // PWA in the background -- this is what makes the bubble able to
@@ -216,9 +230,7 @@ public class BubbleService extends Service {
                         return true;
                     case MotionEvent.ACTION_UP:
                         if (!isDragging) {
-                            // TODO (next step): expand to show call
-                            // controls / the send-request shortcut
-                            // instead of just this placeholder.
+                            togglePanel();
                         }
                         return true;
                 }
@@ -227,6 +239,200 @@ public class BubbleService extends Service {
         });
 
         windowManager.addView(bubbleView, bubbleParams);
+    }
+
+    // ---------------------------------------------------------------
+    // Expandable panel: shown when the bubble is tapped (not dragged).
+    // Small native Android UI, deliberately lightweight -- a code
+    // input + Send button, plus a dynamic row that shows Accept/
+    // Decline when a real request is ringing.
+    // ---------------------------------------------------------------
+
+    private void togglePanel() {
+        if (isPanelShowing) {
+            hidePanel();
+        } else {
+            showPanel();
+        }
+    }
+
+    private void showPanel() {
+        if (isPanelShowing) return;
+        isPanelShowing = true;
+
+        int pad = (int) (12 * getResources().getDisplayMetrics().density);
+        int gap = (int) (8 * getResources().getDisplayMetrics().density);
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable panelBg = new GradientDrawable();
+        panelBg.setColor(Color.parseColor("#131313"));
+        panelBg.setStroke(2, Color.parseColor("#2a2a2a"));
+        panelBg.setCornerRadius(16);
+        panel.setBackground(panelBg);
+        panel.setPadding(pad, pad, pad, pad);
+
+        // Row 1: code input + send button.
+        LinearLayout sendRow = new LinearLayout(this);
+        sendRow.setOrientation(LinearLayout.HORIZONTAL);
+        sendRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        codeInputField = new EditText(this);
+        codeInputField.setHint("CODE");
+        codeInputField.setHintTextColor(Color.parseColor("#666666"));
+        codeInputField.setTextColor(Color.WHITE);
+        codeInputField.setSingleLine(true);
+        codeInputField.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.AllCaps(), new android.text.InputFilter.LengthFilter(4)});
+        codeInputField.setBackgroundColor(Color.parseColor("#1a1a1a"));
+        codeInputField.setPadding(pad, pad / 2, pad, pad / 2);
+        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        inputLp.setMarginEnd(gap);
+        codeInputField.setLayoutParams(inputLp);
+
+        Button sendButton = new Button(this);
+        sendButton.setText("Send");
+        sendButton.setTextColor(Color.parseColor("#0a0a0a"));
+        GradientDrawable sendBg = new GradientDrawable();
+        sendBg.setColor(Color.parseColor("#3ddc97"));
+        sendBg.setCornerRadius(8);
+        sendButton.setBackground(sendBg);
+        sendButton.setOnClickListener(v -> {
+            String code = codeInputField.getText().toString().trim();
+            if (code.length() == 4) {
+                sendConnectionRequest(code);
+            }
+        });
+
+        sendRow.addView(codeInputField);
+        sendRow.addView(sendButton);
+
+        // Row 2 (dynamic): populated with Accept/Decline only when a
+        // request is actually ringing -- see updateBubbleAppearance,
+        // which calls refreshPanelRequestRow() whenever state changes
+        // while the panel happens to be open.
+        requestStatusRow = new LinearLayout(this);
+        requestStatusRow.setOrientation(LinearLayout.HORIZONTAL);
+        requestStatusRow.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = gap;
+        requestStatusRow.setLayoutParams(rowLp);
+
+        panel.addView(sendRow);
+        panel.addView(requestStatusRow);
+        refreshPanelRequestRow();
+
+        panelView = panel;
+
+        int overlayType = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
+
+        int panelWidthPx = (int) (240 * getResources().getDisplayMetrics().density);
+
+        panelParams = new WindowManager.LayoutParams(
+                panelWidthPx,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                overlayType,
+                // Focusable (unlike the bubble itself) so the code
+                // input field can actually receive keyboard input.
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                PixelFormat.TRANSLUCENT
+        );
+        panelParams.gravity = Gravity.TOP | Gravity.START;
+        // Position the panel just below-right of wherever the bubble
+        // currently is, rather than a fixed screen location.
+        panelParams.x = bubbleParams.x;
+        panelParams.y = bubbleParams.y + (int) (56 * getResources().getDisplayMetrics().density);
+
+        windowManager.addView(panelView, panelParams);
+    }
+
+    private void hidePanel() {
+        if (!isPanelShowing) return;
+        isPanelShowing = false;
+
+        // Dismiss the keyboard if it was up for the code field.
+        if (codeInputField != null) {
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) imm.hideSoftInputFromWindow(codeInputField.getWindowToken(), 0);
+        }
+
+        if (panelView != null && windowManager != null) {
+            windowManager.removeView(panelView);
+        }
+        panelView = null;
+        codeInputField = null;
+        requestStatusRow = null;
+    }
+
+    // Sends a connection request using the exact same backend
+    // endpoint the main web app already uses (send-request) -- via
+    // the hidden WebView's JS, since that's the only context with
+    // both the real deviceId and a live fetch() able to reach your
+    // Netlify functions with the right origin/cookies context.
+    private void sendConnectionRequest(String targetCode) {
+        String js = "(function() {"
+                + "  if (window.sendRequestFromNative) {"
+                + "    window.sendRequestFromNative('" + targetCode.replace("'", "") + "');"
+                + "  }"
+                + "})();";
+        runOnWebView(js);
+        android.widget.Toast.makeText(
+                getApplicationContext(),
+                "Request sent to " + targetCode,
+                android.widget.Toast.LENGTH_SHORT
+        ).show();
+        if (codeInputField != null) codeInputField.setText("");
+        hidePanel();
+    }
+
+    // Rebuilds the panel's dynamic Accept/Decline row to match
+    // current state. Safe to call even when the panel isn't showing
+    // (it just does nothing in that case).
+    private void refreshPanelRequestRow() {
+        if (requestStatusRow == null) return;
+        requestStatusRow.removeAllViews();
+
+        if (!"ringing".equals(currentCallState)) {
+            return;
+        }
+
+        Button acceptBtn = new Button(this);
+        acceptBtn.setText("Accept");
+        acceptBtn.setTextColor(Color.parseColor("#0a0a0a"));
+        GradientDrawable acceptBg = new GradientDrawable();
+        acceptBg.setColor(Color.parseColor("#3ddc97"));
+        acceptBg.setCornerRadius(8);
+        acceptBtn.setBackground(acceptBg);
+        acceptBtn.setOnClickListener(v -> respondToRingingRequest("accept"));
+
+        Button declineBtn = new Button(this);
+        declineBtn.setText("Decline");
+        declineBtn.setTextColor(Color.WHITE);
+        GradientDrawable declineBg = new GradientDrawable();
+        declineBg.setColor(Color.parseColor("#ff5c5c"));
+        declineBg.setCornerRadius(8);
+        declineBtn.setBackground(declineBg);
+        declineBtn.setOnClickListener(v -> respondToRingingRequest("decline"));
+
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        int gap = (int) (8 * getResources().getDisplayMetrics().density);
+        btnLp.setMarginEnd(gap);
+        acceptBtn.setLayoutParams(btnLp);
+
+        requestStatusRow.addView(acceptBtn);
+        requestStatusRow.addView(declineBtn);
+    }
+
+    private void respondToRingingRequest(String response) {
+        String js = "(function() {"
+                + "  if (window.respondToRingingRequestFromNative) {"
+                + "    window.respondToRingingRequestFromNative('" + response + "');"
+                + "  }"
+                + "})();";
+        runOnWebView(js);
+        hidePanel();
     }
 
     // Loads your real, existing PWA into an invisible WebView running
@@ -416,6 +622,11 @@ public class BubbleService extends Service {
                 break;
         }
         bubble.setBackground(shape);
+
+        // Keep the panel's Accept/Decline row in sync if it happens
+        // to be open right now (e.g. a request arrives while the
+        // person already has the panel expanded for another reason).
+        refreshPanelRequestRow();
     }
 
     private Notification buildForegroundNotification() {
@@ -449,6 +660,10 @@ public class BubbleService extends Service {
     public void onDestroy() {
         super.onDestroy();
         nativePollingHandler.removeCallbacksAndMessages(null);
+        if (panelView != null && windowManager != null) {
+            windowManager.removeView(panelView);
+            panelView = null;
+        }
         if (bubbleView != null && windowManager != null) {
             windowManager.removeView(bubbleView);
             bubbleView = null;
