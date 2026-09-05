@@ -29,10 +29,12 @@ public class VoxxChatLauncherActivity extends LauncherActivity {
     private static final String PREFS_NAME = "voxx_chat_shared_prefs";
     private static final String PREF_DEVICE_ID = "device_id";
     private static final String PREF_HAS_SEEN_OVERLAY_EXPLANATION = "has_seen_overlay_explanation";
+    private static final String PREF_USER_DISABLED_BUBBLE = "user_disabled_bubble";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        handleBubbleToggleIntent();
         setupBubbleFeature();
     }
 
@@ -44,11 +46,48 @@ public class VoxxChatLauncherActivity extends LauncherActivity {
         setupBubbleFeature();
     }
 
-    private void setupBubbleFeature() {
-        boolean hasOverlayPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || Settings.canDrawOverlays(this);
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleBubbleToggleIntent();
+    }
 
-        if (hasOverlayPermission) {
+    // Detects the ?bubbleAction=enable/disable signal the web page
+    // sends by navigating to a special URL (see the bubble toggle
+    // switch in index.html). A TWA has no other channel available
+    // for the visible app to tell native code to do something --
+    // there's no JS bridge in a real Chrome tab, only URL parameters
+    // going in, and this pattern reusing that same mechanism.
+    private void handleBubbleToggleIntent() {
+        Uri data = getIntent() != null ? getIntent().getData() : null;
+        if (data == null) return;
+
+        String action = data.getQueryParameter("bubbleAction");
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+        if ("enable".equals(action)) {
+            prefs.edit().putBoolean(PREF_USER_DISABLED_BUBBLE, false).apply();
+            if (hasOverlayPermission()) {
+                startService(new Intent(this, BubbleService.class));
+            } else {
+                startActivity(new Intent(this, OverlayPermissionActivity.class));
+            }
+        } else if ("disable".equals(action)) {
+            prefs.edit().putBoolean(PREF_USER_DISABLED_BUBBLE, true).apply();
+            stopService(new Intent(this, BubbleService.class));
+        }
+    }
+
+    private void setupBubbleFeature() {
+        // If the person has explicitly turned the bubble off via the
+        // in-app toggle, don't auto-start it just because the app
+        // reopened -- respect their choice until they turn it back on.
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        boolean userWantsBubbleOff = prefs.getBoolean(PREF_USER_DISABLED_BUBBLE, false);
+        if (userWantsBubbleOff) return;
+
+        if (hasOverlayPermission()) {
             // Already granted (from a previous visit, or below M
             // where it's automatic) -- just make sure the bubble
             // service is running, without showing anything extra.
@@ -59,12 +98,15 @@ public class VoxxChatLauncherActivity extends LauncherActivity {
         // Not granted yet. Only interrupt with the explanation screen
         // the FIRST time, so returning users aren't nagged repeatedly
         // if they've already dismissed it once without granting.
-        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         boolean hasSeenExplanation = prefs.getBoolean(PREF_HAS_SEEN_OVERLAY_EXPLANATION, false);
         if (!hasSeenExplanation) {
             prefs.edit().putBoolean(PREF_HAS_SEEN_OVERLAY_EXPLANATION, true).apply();
             startActivity(new Intent(this, OverlayPermissionActivity.class));
         }
+    }
+
+    private boolean hasOverlayPermission() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this);
     }
 
     @Override
