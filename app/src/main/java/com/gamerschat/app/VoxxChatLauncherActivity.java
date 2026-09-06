@@ -7,6 +7,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import com.google.androidbrowserhelper.trusted.LauncherActivity;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import org.json.JSONObject;
 
 // This is the OFFICIAL, documented way to pass native Android data
 // into a Trusted Web Activity's URL (per Chrome's own developer
@@ -19,89 +23,119 @@ import com.google.androidbrowserhelper.trusted.LauncherActivity;
 //
 // This activity is also where the whole floating-bubble feature now
 // lives from the user's point of view: no separate "Bubble Setup"
-// icon anymore. Opening the real Voxx Chat app automatically checks
-// for the overlay permission and starts the bubble service, or
-// routes to a one-time explanation screen first if permission
-// hasn't been granted yet (Android requires that to be an explicit,
-// explained user action -- it can't be silently skipped).
+// icon anymore. Opening the real Voxx Chat app checks the REAL
+// bubble-enabled preference from the backend (the one channel
+// genuinely shared between this app's Chrome-based WebView and the
+// bubble's separate hidden WebView) and starts/stops the service to
+// match, or routes to a one-time explanation screen first if
+// permission hasn't been granted yet.
+//
+// An earlier version tried signaling the toggle via a special URL
+// (?bubbleAction=...), but that only works when the app is launched
+// FRESH via a deep link -- navigating an already-open Chrome tab
+// never creates a new Android Intent, so native code never actually
+// received it. Checking real backend state on every resume instead
+// is what actually works.
 public class VoxxChatLauncherActivity extends LauncherActivity {
 
     private static final String PREFS_NAME = "voxx_chat_shared_prefs";
     private static final String PREF_DEVICE_ID = "device_id";
-    private static final String PREF_HAS_SEEN_OVERLAY_EXPLANATION = "has_seen_overlay_explanation";
-    private static final String PREF_USER_DISABLED_BUBBLE = "user_disabled_bubble";
+    private static final String PREF_OVERLAY_EXPLANATION_LAST_SHOWN = "overlay_explanation_last_shown";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        handleBubbleToggleIntent();
         setupBubbleFeature();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        // Also re-check on resume, in case the person just came back
-        // from granting the permission in Android's settings screen.
+        // Re-check every time the app comes back to the foreground --
+        // this is what picks up a toggle change made in the web UI,
+        // since there's no direct/instant channel from that toggle
+        // into this native code.
         setupBubbleFeature();
     }
 
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        handleBubbleToggleIntent();
-    }
-
-    // Detects the ?bubbleAction=enable/disable signal the web page
-    // sends by navigating to a special URL (see the bubble toggle
-    // switch in index.html). A TWA has no other channel available
-    // for the visible app to tell native code to do something --
-    // there's no JS bridge in a real Chrome tab, only URL parameters
-    // going in, and this pattern reusing that same mechanism.
-    private void handleBubbleToggleIntent() {
-        Uri data = getIntent() != null ? getIntent().getData() : null;
-        if (data == null) return;
-
-        String action = data.getQueryParameter("bubbleAction");
-        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-
-        if ("enable".equals(action)) {
-            prefs.edit().putBoolean(PREF_USER_DISABLED_BUBBLE, false).apply();
-            if (hasOverlayPermission()) {
-                startService(new Intent(this, BubbleService.class));
-            } else {
-                startActivity(new Intent(this, OverlayPermissionActivity.class));
-            }
-        } else if ("disable".equals(action)) {
-            prefs.edit().putBoolean(PREF_USER_DISABLED_BUBBLE, true).apply();
-            stopService(new Intent(this, BubbleService.class));
-        }
-    }
-
     private void setupBubbleFeature() {
-        // If the person has explicitly turned the bubble off via the
-        // in-app toggle, don't auto-start it just because the app
-        // reopened -- respect their choice until they turn it back on.
-        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        boolean userWantsBubbleOff = prefs.getBoolean(PREF_USER_DISABLED_BUBBLE, false);
-        if (userWantsBubbleOff) return;
+        String sharedDeviceId = getOrCreateSharedDeviceId();
 
-        if (hasOverlayPermission()) {
-            // Already granted (from a previous visit, or below M
-            // where it's automatic) -- just make sure the bubble
-            // service is running, without showing anything extra.
-            startService(new Intent(this, BubbleService.class));
-            return;
-        }
+        new Thread(() -> {
+            Boolean bubbleEnabledOnBackend = fetchBubbleEnabledFromBackend(sharedDeviceId);
+            // null means the fetch failed (offline, etc.) -- in that
+            // case, fall back to whatever the overlay permission
+            // already implies, rather than forcing the bubble off
+            // just because of a transient network issue.
+            runOnUiThread(() -> {
+                if (bubbleEnabledOnBackend != null && !bubbleEnabledOnBackend) {
+                    stopService(new Intent(this, BubbleService.class));
+                    return;
+                }
 
-        // Not granted yet. Only interrupt with the explanation screen
-        // the FIRST time, so returning users aren't nagged repeatedly
-        // if they've already dismissed it once without granting.
-        boolean hasSeenExplanation = prefs.getBoolean(PREF_HAS_SEEN_OVERLAY_EXPLANATION, false);
-        if (!hasSeenExplanation) {
-            prefs.edit().putBoolean(PREF_HAS_SEEN_OVERLAY_EXPLANATION, true).apply();
-            startActivity(new Intent(this, OverlayPermissionActivity.class));
+                if (hasOverlayPermission()) {
+                    startService(new Intent(this, BubbleService.class));
+                    return;
+                }
+
+                // Permission not granted yet.
+                android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                // Show the explanation screen whenever permission is
+                // genuinely missing -- NOT just once ever (that
+                // earlier approach meant anyone who dismissed it once,
+                // even accidentally, would then have to find the
+                // Android settings screen manually forever after,
+                // which is exactly the real complaint this fixes). A
+                // short cooldown avoids reopening it if the person
+                // JUST dismissed it moments ago (e.g. tapped "Not
+                // now" and immediately reopened the app).
+                long lastShownAt = prefs.getLong(PREF_OVERLAY_EXPLANATION_LAST_SHOWN, 0);
+                boolean cooldownElapsed = (System.currentTimeMillis() - lastShownAt) > 10_000;
+                if (cooldownElapsed && (bubbleEnabledOnBackend == null || bubbleEnabledOnBackend)) {
+                    prefs.edit().putLong(PREF_OVERLAY_EXPLANATION_LAST_SHOWN, System.currentTimeMillis()).apply();
+                    startActivity(new Intent(this, OverlayPermissionActivity.class));
+                }
+            });
+        }).start();
+    }
+
+    // Reads the bubbleEnabled flag directly from your existing
+    // get-code backend function -- plain HttpURLConnection rather
+    // than adding a new HTTP library dependency for one simple GET-
+    // like POST request. Returns null on any failure so callers can
+    // distinguish "genuinely disabled" from "couldn't check."
+    private Boolean fetchBubbleEnabledFromBackend(String deviceId) {
+        try {
+            URL url = new URL(getString(R.string.twa_launch_url) + ".netlify/functions/get-code");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+
+            JSONObject body = new JSONObject();
+            body.put("deviceId", deviceId);
+
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(body.toString().getBytes("UTF-8"));
+            }
+
+            int responseCode = conn.getResponseCode();
+            if (responseCode != 200) return null;
+
+            java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(conn.getInputStream()));
+            StringBuilder responseText = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) responseText.append(line);
+            reader.close();
+
+            JSONObject json = new JSONObject(responseText.toString());
+            if (!json.optBoolean("success", false)) return null;
+            return json.optBoolean("bubbleEnabled", true);
+        } catch (Exception e) {
+            return null;
         }
     }
 
