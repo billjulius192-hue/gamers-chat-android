@@ -68,6 +68,18 @@ public class VoxxChatLauncherActivity extends LauncherActivity {
             // already implies, rather than forcing the bubble off
             // just because of a transient network issue.
             runOnUiThread(() -> {
+                // TEMPORARY diagnostic: shows exactly what the backend
+                // check returned, so we can see whether this fetch is
+                // silently failing (returning null) instead of the
+                // real toggle value -- which would explain the bubble
+                // ignoring the toggle entirely.
+                android.widget.Toast.makeText(
+                        getApplicationContext(),
+                        "Bubble check: backend says " + bubbleEnabledOnBackend
+                                + " | permission=" + hasOverlayPermission(),
+                        android.widget.Toast.LENGTH_LONG
+                ).show();
+
                 if (bubbleEnabledOnBackend != null && !bubbleEnabledOnBackend) {
                     stopService(new Intent(this, BubbleService.class));
                     return;
@@ -132,9 +144,19 @@ public class VoxxChatLauncherActivity extends LauncherActivity {
             reader.close();
 
             JSONObject json = new JSONObject(responseText.toString());
-            if (!json.optBoolean("success", false)) return null;
+            if (!json.optBoolean("success", false)) {
+                android.util.Log.e("VoxxChatBubbleCheck", "Backend returned success=false: " + responseText);
+                return null;
+            }
             return json.optBoolean("bubbleEnabled", true);
         } catch (Exception e) {
+            // TEMPORARY diagnostic: this was previously silently
+            // swallowed, giving zero visibility into why the toggle
+            // check might be failing. Logging it (visible via
+            // Toast in setupBubbleFeature, and in real crash/log
+            // tools if used later) is how we find the real cause
+            // instead of guessing.
+            android.util.Log.e("VoxxChatBubbleCheck", "Fetch failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
             return null;
         }
     }
