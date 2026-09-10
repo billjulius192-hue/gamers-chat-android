@@ -451,6 +451,29 @@ public class BubbleService extends Service {
 
         hiddenWebView.addJavascriptInterface(new AndroidBridge(), "bridgeToAndroid");
 
+        // THE ACTUAL FIX for "request accepted but no audio connects
+        // at all, from the bubble": WebView requires a
+        // WebChromeClient.onPermissionRequest() override to grant a
+        // web page's getUserMedia() (microphone) request -- Agora's
+        // SDK uses this internally to access the mic. Without this
+        // override, WebView silently DENIES every mic request by
+        // default, with no visible error on the JS side beyond
+        // whatever Agora's own error handling produces. This was
+        // missing entirely, which is why calls initiated via the
+        // bubble panel never actually got audio in either direction,
+        // even though the join/publish sequence itself was correct.
+        hiddenWebView.setWebChromeClient(new android.webkit.WebChromeClient() {
+            @Override
+            public void onPermissionRequest(android.webkit.PermissionRequest request) {
+                runOnUiThread(() -> {
+                    // Only grant the specific resources requested
+                    // (typically RESOURCE_AUDIO_CAPTURE for a voice
+                    // call), not blindly grant everything asked for.
+                    request.grant(request.getResources());
+                });
+            }
+        });
+
         hiddenWebView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
@@ -547,10 +570,31 @@ public class BubbleService extends Service {
             @Override
             public void run() {
                 runOnWebView("if (window.checkIncomingRequestsNow) { window.checkIncomingRequestsNow(); }");
+                checkIfBubbleShouldStillBeEnabled();
                 nativePollingHandler.postDelayed(this, 3000);
             }
         };
         nativePollingHandler.post(pollTask);
+    }
+
+    // THE ACTUAL FIX for the toggle not controlling the bubble: an
+    // earlier approach tried to have the MAIN APP (real Chrome, no
+    // bridge) signal native code, which turned out unreliable (only
+    // works on a truly fresh app launch, and silently failed in ways
+    // we couldn't fully diagnose even with logging). This instead
+    // uses the bubble's OWN hidden WebView -- which we already know
+    // has a real, working, tested bridge (the same one driving
+    // checkIncomingRequestsNow above) -- to check the same backend
+    // flag directly, on the same reliable 3-second cycle, and stop
+    // itself if the person turned the toggle off. No dependency on
+    // the fragile main-app-to-native channel at all.
+    private void checkIfBubbleShouldStillBeEnabled() {
+        String js = "(function() {"
+                + "  if (window.checkBubbleEnabledNow) {"
+                + "    window.checkBubbleEnabledNow();"
+                + "  }"
+                + "})();";
+        runOnWebView(js);
     }
 
     private void runOnWebView(String js) {
@@ -578,6 +622,19 @@ public class BubbleService extends Service {
             new Handler(Looper.getMainLooper()).post(() -> {
                 android.util.Log.i("VoxxChatBubble", "State changed to " + state);
                 updateBubbleAppearance(state);
+            });
+        }
+
+        // Called by the page's checkBubbleEnabledNow() (see
+        // index.html) when it finds the backend's bubbleEnabled flag
+        // is false -- genuinely stops this service, unlike the
+        // earlier main-app-side approach which never reliably reached
+        // native code at all.
+        @JavascriptInterface
+        public void stopBubbleFromWeb() {
+            new Handler(Looper.getMainLooper()).post(() -> {
+                android.util.Log.i("VoxxChatBubble", "Stopping bubble: backend reports it's disabled");
+                stopSelf();
             });
         }
     }

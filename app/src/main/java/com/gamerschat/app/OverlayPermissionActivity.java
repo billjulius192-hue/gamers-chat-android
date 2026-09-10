@@ -25,6 +25,7 @@ public class OverlayPermissionActivity extends Activity {
 
     private static final int REQUEST_CODE_OVERLAY_PERMISSION = 1001;
     private static final int REQUEST_CODE_NOTIFICATION_PERMISSION = 1002;
+    private static final int REQUEST_CODE_MICROPHONE_PERMISSION = 1003;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -34,6 +35,17 @@ public class OverlayPermissionActivity extends Activity {
         // ANY notification to show, including ones fired from a
         // background Service -- without it they're silently swallowed.
         requestNotificationPermissionIfNeeded();
+
+        // REQUIRED for the bubble's calls to actually get audio at
+        // all. The main app's calls work through real Chrome, which
+        // has its own built-in mic permission UI -- but our raw
+        // WebView has no such flow, and RECORD_AUDIO is a dangerous
+        // permission requiring an explicit runtime grant, same
+        // category as notifications. Without this, even granting mic
+        // access at the WebView layer (via WebChromeClient) still
+        // fails at the OS layer, which is why requests accepted via
+        // the bubble connected with zero audio on either side.
+        requestMicrophonePermissionIfNeeded();
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -53,7 +65,10 @@ public class OverlayPermissionActivity extends Activity {
                         + "so you can see call status without leaving your match.\n\n"
                         + "This needs one special permission: \"Display over other "
                         + "apps.\" Tap below, then find Voxx Chat in the list and "
-                        + "turn the toggle on."
+                        + "turn the toggle on.\n\n"
+                        + "Android will also ask for microphone access, needed so "
+                        + "your voice can actually be heard on calls started from "
+                        + "the bubble."
         );
         explanation.setTextColor(Color.WHITE);
         explanation.setTextSize(15);
@@ -107,6 +122,16 @@ public class OverlayPermissionActivity extends Activity {
                         REQUEST_CODE_NOTIFICATION_PERMISSION
                 );
             }
+        }
+    }
+
+    private void requestMicrophonePermissionIfNeeded() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{Manifest.permission.RECORD_AUDIO},
+                    REQUEST_CODE_MICROPHONE_PERMISSION
+            );
         }
     }
 
